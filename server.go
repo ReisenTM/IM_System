@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 )
@@ -46,11 +47,29 @@ func (sv *Server) BroadCast(user *User, msg string) {
 // 服务器事件处理
 func (sv *Server) Server_Handler(conn net.Conn) {
 	// fmt.Println("服务器启动")
-	newUser := AddUser(conn)
-	sv.Msglock.Lock()
-	sv.UserMap[newUser.Name] = newUser
-	sv.Msglock.Unlock()
-	sv.BroadCast(newUser, "用户已上线")
+	user := AddUser(conn, sv)
+	user.User_Online()
+	go func() {
+		// 处理用户输入
+		buf := make([]byte, 4096)
+		for {
+			n, err := conn.Read(buf)
+			if n == 0 {
+				// 用户下线
+				user.User_Offline()
+				return
+			}
+			if err != nil && err != io.EOF {
+				fmt.Println("Read error", conn)
+				return
+			}
+			// 对获取到的消息进行提取
+			msg := string(buf[:n-1])
+			// 对msg进行处理
+			user.User_Message(msg)
+		}
+	}()
+
 	// 永久阻塞
 	select {}
 }
