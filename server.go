@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -40,7 +41,7 @@ func (sv *Server) Server_MsgListener() {
 
 // 广播消息的方法
 func (sv *Server) BroadCast(user *User, msg string) {
-	broadCast := fmt.Sprintf("[地址:%s]", user.Addr)
+	broadCast := fmt.Sprintf("[用户:%s]", user.Name)
 	sv.Message <- broadCast + msg
 }
 
@@ -49,6 +50,9 @@ func (sv *Server) Server_Handler(conn net.Conn) {
 	// fmt.Println("服务器启动")
 	user := AddUser(conn, sv)
 	user.User_Online()
+
+	// 是否活跃
+	isLive := make(chan bool)
 	go func() {
 		// 处理用户输入
 		buf := make([]byte, 4096)
@@ -67,11 +71,27 @@ func (sv *Server) Server_Handler(conn net.Conn) {
 			msg := string(buf[:n-1])
 			// 对msg进行处理
 			user.User_Message(msg)
+			// 刷新alive计时器
+			isLive <- true
 		}
 	}()
 
 	// 永久阻塞
-	select {}
+	for {
+		select {
+		case <-isLive:
+		// 当前用户活跃
+		case <-time.After(100 * time.Second):
+			// 实际是channel
+			user.User_SendMsg("你被踢了")
+			close(user.Chn)
+			user.Conn.Close()
+			user.sv.Msglock.Lock()
+			delete(user.sv.UserMap, user.Name)
+			user.sv.Msglock.Unlock()
+			return
+		}
+	}
 }
 
 func (sv *Server) Server_Start() {

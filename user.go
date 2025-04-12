@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 type User struct {
@@ -58,7 +59,59 @@ func (this *User) User_Offline() {
 	this.sv.BroadCast(this, "用户已下线")
 }
 
+func (this *User) User_SendMsg(msg string) {
+	this.Conn.Write([]byte(msg + "\n"))
+}
+
 // 消息处理
 func (this *User) User_Message(msg string) {
-	this.sv.BroadCast(this, msg)
+	if msg == "/who" {
+		// 查询在线用户
+		this.sv.Msglock.Lock()
+		for _, u := range this.sv.UserMap {
+			this.User_SendMsg("[" + u.Name + "]" + "---在线")
+		}
+		this.sv.Msglock.Unlock()
+	} else if len(msg) > 7 && msg[:7] == "/rename" {
+		newName := strings.Split(msg, " ")[1]
+		fmt.Println("User changed name,newName:", newName)
+		// 查看是否已经有该名字
+		this.sv.Msglock.Lock()
+		_, ok := this.sv.UserMap[newName]
+		if ok {
+			this.User_SendMsg("该用户名已存在")
+			this.sv.Msglock.Unlock()
+			return
+		} else {
+			// 删除原有用户,map 的 key 不能被修改
+			delete(this.sv.UserMap, this.Name)
+			this.sv.UserMap[newName] = this
+			this.sv.Msglock.Unlock()
+			this.Name = newName
+			this.User_SendMsg("用户名已更新")
+			return
+		}
+		// 格式 /chat 张三 你好
+	} else if len(msg) > 5 && msg[:5] == "/chat" {
+		fmt.Println("msg:", msg)
+		chatInfo := strings.Split(msg, " ")
+		if len(chatInfo) < 3 {
+			this.User_SendMsg("格式错误，正确用法: /chat 用户名 内容")
+			return
+		}
+		chatObj := chatInfo[1]
+		chatContent := strings.Join(chatInfo[2:], "")
+		fmt.Println("User create private chat,object:", chatObj)
+		fmt.Println("User create private chat,content:", chatContent)
+		this.sv.Msglock.Lock()
+		chatUser, hasUser := this.sv.UserMap[chatObj]
+		this.sv.Msglock.Unlock()
+		if !hasUser {
+			this.User_SendMsg("没有该用户")
+			return
+		}
+		chatUser.User_SendMsg("[" + chatObj + "]" + "对你说:" + chatContent)
+	} else {
+		this.sv.BroadCast(this, msg)
+	}
 }
